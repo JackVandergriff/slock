@@ -18,9 +18,11 @@
 #include <X11/keysym.h>
 #include <X11/Xlib.h>
 #include <X11/Xutil.h>
+#include <X11/Xresource.h>
 
 #include "arg.h"
 #include "util.h"
+#include "cover.h"
 
 char *argv0;
 
@@ -46,7 +48,7 @@ struct xrandr {
 
 #include "config.h"
 
-static void
+	static void
 die(const char *errstr, ...)
 {
 	va_list ap;
@@ -61,7 +63,7 @@ die(const char *errstr, ...)
 #include <fcntl.h>
 #include <linux/oom.h>
 
-static void
+	static void
 dontkillme(void)
 {
 	FILE *f;
@@ -76,14 +78,14 @@ dontkillme(void)
 	if (fclose(f)) {
 		if (errno == EACCES)
 			die("slock: unable to disable OOM killer. "
-			    "Make sure to suid or sgid slock.\n");
+					"Make sure to suid or sgid slock.\n");
 		else
 			die("slock: fclose %s: %s\n", oomfile, strerror(errno));
 	}
 }
 #endif
 
-static const char *
+	static const char *
 gethash(void)
 {
 	const char *hash;
@@ -104,7 +106,7 @@ gethash(void)
 		struct spwd *sp;
 		if (!(sp = getspnam(pw->pw_name)))
 			die("slock: getspnam: cannot retrieve shadow entry. "
-			    "Make sure to suid or sgid slock.\n");
+					"Make sure to suid or sgid slock.\n");
 		hash = sp->sp_pwdp;
 	}
 #else
@@ -112,11 +114,11 @@ gethash(void)
 #ifdef __OpenBSD__
 		if (!(pw = getpwuid_shadow(getuid())))
 			die("slock: getpwnam_shadow: cannot retrieve shadow entry. "
-			    "Make sure to suid or sgid slock.\n");
+					"Make sure to suid or sgid slock.\n");
 		hash = pw->pw_passwd;
 #else
 		die("slock: getpwuid: cannot retrieve shadow entry. "
-		    "Make sure to suid or sgid slock.\n");
+				"Make sure to suid or sgid slock.\n");
 #endif /* __OpenBSD__ */
 	}
 #endif /* HAVE_SHADOW_H */
@@ -124,9 +126,9 @@ gethash(void)
 	return hash;
 }
 
-static void
+	static void
 readpw(Display *dpy, struct xrandr *rr, struct lock **locks, int nscreens,
-       const char *hash)
+		const char *hash)
 {
 	XRRScreenChangeNotifyEvent *rre;
 	char buf[32], passwd[256], *inputhash;
@@ -140,7 +142,10 @@ readpw(Display *dpy, struct xrandr *rr, struct lock **locks, int nscreens,
 	failure = 0;
 	oldc = INIT;
 
+	// TODO This is the main loop probably
 	while (running && !XNextEvent(dpy, &ev)) {
+		if (LockEventHandler(dpy, ev) != 0)
+			continue;
 		if (ev.type == KeyPress) {
 			explicit_bzero(&buf, sizeof(buf));
 			num = XLookupString(&ev.xkey, buf, sizeof(buf), &ksym, 0);
@@ -151,49 +156,57 @@ readpw(Display *dpy, struct xrandr *rr, struct lock **locks, int nscreens,
 					ksym = (ksym - XK_KP_0) + XK_0;
 			}
 			if (IsFunctionKey(ksym) ||
-			    IsKeypadKey(ksym) ||
-			    IsMiscFunctionKey(ksym) ||
-			    IsPFKey(ksym) ||
-			    IsPrivateKeypadKey(ksym))
+					IsKeypadKey(ksym) ||
+					IsMiscFunctionKey(ksym) ||
+					IsPFKey(ksym) ||
+					IsPrivateKeypadKey(ksym))
 				continue;
 			switch (ksym) {
-			case XK_Return:
-				passwd[len] = '\0';
-				errno = 0;
-				if (!(inputhash = crypt(passwd, hash)))
-					fprintf(stderr, "slock: crypt: %s\n", strerror(errno));
-				else
-					running = !!strcmp(inputhash, hash);
-				if (running) {
-					XBell(dpy, 100);
-					failure = 1;
-				}
-				explicit_bzero(&passwd, sizeof(passwd));
-				len = 0;
-				break;
-			case XK_Escape:
-				explicit_bzero(&passwd, sizeof(passwd));
-				len = 0;
-				break;
-			case XK_BackSpace:
-				if (len)
-					passwd[--len] = '\0';
-				break;
-			default:
-				if (num && !iscntrl((int)buf[0]) &&
-				    (len + num < sizeof(passwd))) {
-					memcpy(passwd + len, buf, num);
-					len += num;
-				}
-				break;
+				case XK_Return:
+					passwd[len] = '\0';
+					errno = 0;
+					if (!(inputhash = crypt(passwd, hash)))
+						fprintf(stderr, "slock: crypt: %s\n", strerror(errno));
+					else
+						running = !!strcmp(inputhash, hash);
+					if (running) {
+						XBell(dpy, 100);
+						failure = 1;
+					}
+					explicit_bzero(&passwd, sizeof(passwd));
+					len = 0;
+					break;
+				case XK_Escape:
+					explicit_bzero(&passwd, sizeof(passwd));
+					len = 0;
+					break;
+				case XK_BackSpace:
+					if (len)
+						passwd[--len] = '\0';
+					break;
+				default:
+					if (num && !iscntrl((int)buf[0]) &&
+							(len + num < sizeof(passwd))) {
+						memcpy(passwd + len, buf, num);
+						len += num;
+						// TODO Thing? This is where keypresses are registered
+					}
+					break;
 			}
 			color = len ? INPUT : ((failure || failonclear) ? FAILED : INIT);
 			if (running && oldc != color) {
 				for (screen = 0; screen < nscreens; screen++) {
-					XSetWindowBackground(dpy,
-					                     locks[screen]->win,
-					                     locks[screen]->colors[color]);
-					XClearWindow(dpy, locks[screen]->win);
+					// TODO failure to unlock
+					if (failure == 1) {
+						int slate = 0;
+						/* XSetWindowBackground(dpy, */
+						/* 		locks[screen]->win, */
+						/* 		locks[screen]->colors[color]); */
+						pl_control(PL_SET_COLOR
+								|PL_REDRAW, 0xB22222A0, &slate);
+						pl_control(PL_SET_COLOR, slate, NULL);
+						failure++;
+					}
 				}
 				oldc = color;
 			}
@@ -202,12 +215,12 @@ readpw(Display *dpy, struct xrandr *rr, struct lock **locks, int nscreens,
 			for (screen = 0; screen < nscreens; screen++) {
 				if (locks[screen]->win == rre->window) {
 					if (rre->rotation == RR_Rotate_90 ||
-					    rre->rotation == RR_Rotate_270)
+							rre->rotation == RR_Rotate_270)
 						XResizeWindow(dpy, locks[screen]->win,
-						              rre->height, rre->width);
+								rre->height, rre->width);
 					else
 						XResizeWindow(dpy, locks[screen]->win,
-						              rre->width, rre->height);
+								rre->width, rre->height);
 					XClearWindow(dpy, locks[screen]->win);
 					break;
 				}
@@ -219,59 +232,48 @@ readpw(Display *dpy, struct xrandr *rr, struct lock **locks, int nscreens,
 	}
 }
 
-static struct lock *
+	static struct lock *
 lockscreen(Display *dpy, struct xrandr *rr, int screen)
 {
 	char curs[] = {0, 0, 0, 0, 0, 0, 0, 0};
 	int i, ptgrab, kbgrab;
 	struct lock *lock;
 	XColor color, dummy;
-	XSetWindowAttributes wa;
 	Cursor invisible;
 
 	if (dpy == NULL || screen < 0 || !(lock = malloc(sizeof(struct lock))))
 		return NULL;
 
+	lock->win = getLockCover(dpy);
 	lock->screen = screen;
 	lock->root = RootWindow(dpy, lock->screen);
 
 	for (i = 0; i < NUMCOLS; i++) {
 		XAllocNamedColor(dpy, DefaultColormap(dpy, lock->screen),
-		                 colorname[i], &color, &dummy);
+				colorname[i], &color, &dummy);
 		lock->colors[i] = color.pixel;
 	}
 
-	/* init */
-	wa.override_redirect = 1;
-	wa.background_pixel = lock->colors[INIT];
-	lock->win = XCreateWindow(dpy, lock->root, 0, 0,
-	                          DisplayWidth(dpy, lock->screen),
-	                          DisplayHeight(dpy, lock->screen),
-	                          0, DefaultDepth(dpy, lock->screen),
-	                          CopyFromParent,
-	                          DefaultVisual(dpy, lock->screen),
-	                          CWOverrideRedirect | CWBackPixel, &wa);
 	lock->pmap = XCreateBitmapFromData(dpy, lock->win, curs, 8, 8);
 	invisible = XCreatePixmapCursor(dpy, lock->pmap, lock->pmap,
-	                                &color, &color, 0, 0);
+			&color, &color, 0, 0);
 	XDefineCursor(dpy, lock->win, invisible);
 
 	/* Try to grab mouse pointer *and* keyboard for 600ms, else fail the lock */
 	for (i = 0, ptgrab = kbgrab = -1; i < 6; i++) {
 		if (ptgrab != GrabSuccess) {
 			ptgrab = XGrabPointer(dpy, lock->root, False,
-			                      ButtonPressMask | ButtonReleaseMask |
-			                      PointerMotionMask, GrabModeAsync,
-			                      GrabModeAsync, None, invisible, CurrentTime);
+					ButtonPressMask | ButtonReleaseMask |
+					PointerMotionMask, GrabModeAsync,
+					GrabModeAsync, None, None, CurrentTime);
 		}
 		if (kbgrab != GrabSuccess) {
 			kbgrab = XGrabKeyboard(dpy, lock->root, True,
-			                       GrabModeAsync, GrabModeAsync, CurrentTime);
+					GrabModeAsync, GrabModeAsync, CurrentTime);
 		}
 
 		/* input is grabbed: we can lock the screen */
 		if (ptgrab == GrabSuccess && kbgrab == GrabSuccess) {
-			XMapRaised(dpy, lock->win);
 			if (rr->active)
 				XRRSelectInput(dpy, lock->win, RRScreenChangeNotifyMask);
 
@@ -281,7 +283,7 @@ lockscreen(Display *dpy, struct xrandr *rr, int screen)
 
 		/* retry on AlreadyGrabbed but fail on other errors */
 		if ((ptgrab != AlreadyGrabbed && ptgrab != GrabSuccess) ||
-		    (kbgrab != AlreadyGrabbed && kbgrab != GrabSuccess))
+				(kbgrab != AlreadyGrabbed && kbgrab != GrabSuccess))
 			break;
 
 		usleep(100000);
@@ -290,14 +292,14 @@ lockscreen(Display *dpy, struct xrandr *rr, int screen)
 	/* we couldn't grab all input: fail out */
 	if (ptgrab != GrabSuccess)
 		fprintf(stderr, "slock: unable to grab mouse pointer for screen %d\n",
-		        screen);
+				screen);
 	if (kbgrab != GrabSuccess)
 		fprintf(stderr, "slock: unable to grab keyboard for screen %d\n",
-		        screen);
+				screen);
 	return NULL;
 }
 
-static void
+	static void
 usage(void)
 {
 	die("usage: slock [-v] [cmd [arg ...]]\n");
@@ -316,23 +318,23 @@ main(int argc, char **argv) {
 	int s, nlocks, nscreens;
 
 	ARGBEGIN {
-	case 'v':
-		fprintf(stderr, "slock-"VERSION"\n");
-		return 0;
-	default:
-		usage();
+		case 'v':
+			fprintf(stderr, "slock-"VERSION"\n");
+			return 0;
+		default:
+			usage();
 	} ARGEND
 
 	/* validate drop-user and -group */
 	errno = 0;
 	if (!(pwd = getpwnam(user)))
 		die("slock: getpwnam %s: %s\n", user,
-		    errno ? strerror(errno) : "user entry not found");
+				errno ? strerror(errno) : "user entry not found");
 	duid = pwd->pw_uid;
 	errno = 0;
 	if (!(grp = getgrnam(group)))
 		die("slock: getgrnam %s: %s\n", group,
-		    errno ? strerror(errno) : "group entry not found");
+				errno ? strerror(errno) : "group entry not found");
 	dgid = grp->gr_gid;
 
 #ifdef __linux__
@@ -363,6 +365,7 @@ main(int argc, char **argv) {
 	if (!(locks = calloc(nscreens, sizeof(struct lock *))))
 		die("slock: out of memory\n");
 	for (nlocks = 0, s = 0; s < nscreens; s++) {
+		// TODO screen locking?
 		if ((locks[s] = lockscreen(dpy, &rr, s)) != NULL)
 			nlocks++;
 		else
@@ -377,19 +380,20 @@ main(int argc, char **argv) {
 	/* run post-lock command */
 	if (argc > 0) {
 		switch (fork()) {
-		case -1:
-			die("slock: fork failed: %s\n", strerror(errno));
-		case 0:
-			if (close(ConnectionNumber(dpy)) < 0)
-				die("slock: close: %s\n", strerror(errno));
-			execvp(argv[0], argv);
-			fprintf(stderr, "slock: execvp %s: %s\n", argv[0], strerror(errno));
-			_exit(1);
+			case -1:
+				die("slock: fork failed: %s\n", strerror(errno));
+			case 0:
+				if (close(ConnectionNumber(dpy)) < 0)
+					die("slock: close: %s\n", strerror(errno));
+				execvp(argv[0], argv);
+				fprintf(stderr, "slock: execvp %s: %s\n", argv[0], strerror(errno));
+				_exit(1);
 		}
 	}
 
 	/* everything is now blank. Wait for the correct password */
 	readpw(dpy, &rr, locks, nscreens, hash);
 
+	pl_control(PL_FREE, 0, NULL);
 	return 0;
 }
